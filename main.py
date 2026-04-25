@@ -1,345 +1,142 @@
-import re
+"""Integrated FastAPI backend for a modular multi-stage NLP-to-SQL pipeline."""
+
 import sqlite3
-import torch
-import torch.nn.functional as F
-from transformers import AutoTokenizer, AutoModel
-import sqlglot
-from sqlglot import exp
+import traceback
+from contextlib import contextmanager
+from typing import Any, Dict, List
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+from generator_service import SQLGeneratorService
+from optimization_service import SQLOptimizationService
+from pipeline_service import NL2SQLPipelineService
+from schema_service import build_schema_bundle
+from validation_service import SQLValidationService
 
 
-MODEL_NAME = "roberta-base"
+HF_MODEL_ID = "hansini1211/nl2sql"
+DB_PATH = "company.db"
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModel.from_pretrained(MODEL_NAME)
-model.eval()
-
-
-def encode_text_to_embedding(text):
-    inputs = tokenizer(
-        text,
-        return_tensors="pt",
-        truncation=True,
-        padding=True
-    )
-
-    with torch.no_grad():
-        outputs = model(**inputs)
-
-    return outputs.last_hidden_state.mean(dim=1)
+print(f"Loading model pipeline from {HF_MODEL_ID} ...")
+generator_service = SQLGeneratorService(model_id=HF_MODEL_ID)
+validation_service = SQLValidationService()
+optimization_service = SQLOptimizationService()
+pipeline_service = NL2SQLPipelineService(
+    generator=generator_service,
+    validator=validation_service,
+    optimizer=optimization_service,
+)
+print("Pipeline services loaded!")
 
 
-def cosine_sim(a, b):
-    return F.cosine_similarity(a, b).item()
+app = FastAPI(title="NLP-to-SQL API")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 
-def classify_query_intent(question, schema=""):
-    labels = {
-        "COUNT": "how many total number count quantity",
-        "AGGREGATE": "highest lowest maximum minimum average mean sum total",
-        "SELECT": "show list display records details names data"
-    }
+class QueryRequest(BaseModel):
+    """Incoming query payload."""
 
-    q_emb = encode_text_to_embedding(question)
-
-    best_label = None
-    best_score = -1
-
-    for label, text in labels.items():
-        label_emb = encode_text_to_embedding(text)
-        score = cosine_sim(q_emb, label_emb)
-
-        if score > best_score:
-            best_score = score
-            best_label = label
-
-    return best_label
+    question: str
 
 
-def parse_sql_to_ast(sql):
-    return sqlglot.parse_one(sql)
+class SchemaTable(BaseModel):
+    """Schema details for one database table."""
+
+    table_name: str
+    columns: List[str]
+    sample_rows: List[Dict[str, Any]]
 
 
-def extract_sql_components(sql):
-    result = {}
+class PipelineTrace(BaseModel):
+    """Intermediate pipeline values for debugging and observability."""
+
+    schema_text: str
+    headers: List[str]
+    generated_input: str
+    validator_intent: str
+
+
+class QueryResponse(BaseModel):
+    """End-to-end response from the integrated pipeline."""
+
+    question: str
+    schema: List[SchemaTable]
+    generated_sql: str
+    validated_sql: str
+    final_sql: str
+    result: List[Dict[str, Any]]
+    optimization: Dict[str, Any]
+    intent: str
+    pipeline_trace: PipelineTrace
+
+
+@contextmanager
+def get_db():
+    """Yield a SQLite connection for one request."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+@app.get("/")
+def root() -> FileResponse:
+    """Serve the frontend entry point."""
+    return FileResponse("frontend/index.html")
+
+
+@app.post("/query", response_model=QueryResponse)
+def query(req: QueryRequest) -> QueryResponse:
+    """Run the full schema, generation, validation, execution, and optimization pipeline."""
+    question = req.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
 
     try:
-        expr = parse_sql_to_ast(sql)
-    except:
-        return result
-
-    select_clause = expr.find(exp.Select)
-    if select_clause:
-        result["select"] = [e.sql() for e in select_clause.expressions]
-
-    from_clause = expr.find(exp.From)
-    if from_clause:
-        result["from"] = from_clause.this.sql()
-
-    where_clause = expr.find(exp.Where)
-    if where_clause:
-        result["where"] = where_clause.this.sql()
-
-    joins = []
-    for join in expr.find_all(exp.Join):
-        joins.append({
-            "type": join.args.get("kind", "INNER"),
-            "table": join.this.sql(),
-            "on": join.args.get("on").sql() if join.args.get("on") else None
-        })
-
-    if joins:
-        result["joins"] = joins
-
-    group_clause = expr.find(exp.Group)
-    if group_clause:
-        result["group_by"] = [e.sql() for e in group_clause.expressions]
-
-    having_clause = expr.find(exp.Having)
-    if having_clause:
-        result["having"] = having_clause.this.sql()
-
-    order_clause = expr.find(exp.Order)
-    if order_clause:
-        result["order_by"] = [e.sql() for e in order_clause.expressions]
-
-    return result
-
-
-def parse_database_schema(schema_text):
-    schema = {}
-
-    table_patterns = re.findall(r'(\w+)\((.*?)\)', schema_text)
-
-    for table_name, columns_text in table_patterns:
-        schema[table_name] = [col.strip() for col in columns_text.split(",")]
-
-    return schema
-
-
-def fetch_distinct_column_values(conn, table, columns, limit=100):
-    values = {}
-    cursor = conn.cursor()
-
-    for column in columns:
-        try:
-            cursor.execute(
-                f"SELECT DISTINCT {column} FROM {table} "
-                f"WHERE {column} IS NOT NULL LIMIT {limit}"
-            )
-
-            distinct_values = [str(row[0]) for row in cursor.fetchall()]
-            values[column] = distinct_values
-
-        except:
-            values[column] = []
-
-    return values
-
-
-def infer_numeric_columns(conn, table, columns):
-    numeric_columns = []
-    cursor = conn.cursor()
-
-    for column in columns:
-        try:
-            cursor.execute(f"SELECT {column} FROM {table} LIMIT 5")
-            rows = cursor.fetchall()
-
-            for row in rows:
-                if row[0] is not None:
-                    if isinstance(row[0], (int, float)):
-                        numeric_columns.append(column)
-                    break
-        except:
-            pass
-
-    return numeric_columns
-
-
-def extract_components_from_question(question, schema_text, conn):
-    question_lower = question.lower()
-    schema = parse_database_schema(schema_text)
-
-    components = {
-        "table": None,
-        "columns": [],
-        "filters": []
-    }
-
-    table_name = detect_table_from_question(question_lower, schema)
-    components["table"] = table_name or list(schema.keys())[0]
-
-    table = components["table"]
-    all_columns = schema[table]
-
-    detected_columns = detect_columns_from_question(question_lower, all_columns)
-    components["columns"] = detected_columns if detected_columns else ["*"]
-
-    column_values = fetch_distinct_column_values(conn, table, all_columns)
-
-    value_based_filters = extract_value_filters(question_lower, all_columns, column_values)
-    components["filters"].extend(value_based_filters)
-
-    numeric_filters = extract_numeric_filters(question_lower, all_columns)
-    components["filters"].extend(numeric_filters)
-
-    fallback_numeric_filter = extract_fallback_numeric_filter(
-        question_lower,
-        conn,
-        table,
-        all_columns,
-        components["filters"]
-    )
-
-    if fallback_numeric_filter:
-        components["filters"].append(fallback_numeric_filter)
-
-    return components
-
-
-def detect_table_from_question(question_lower, schema):
-    q_emb = encode_text_to_embedding(question_lower)
-
-    best_table = None
-    best_score = -1
-
-    for table_name in schema:
-        t_emb = encode_text_to_embedding(table_name)
-        score = cosine_sim(q_emb, t_emb)
-
-        if score > best_score:
-            best_score = score
-            best_table = table_name
-
-    return best_table
-
-
-def detect_columns_from_question(question_lower, columns):
-    q_emb = encode_text_to_embedding(question_lower)
-
-    detected_columns = []
-
-    for column in columns:
-        col_text = column.replace("_", " ")
-        c_emb = encode_text_to_embedding(col_text)
-        score = cosine_sim(q_emb, c_emb)
-
-        if score > 0.45:
-            detected_columns.append(column)
-
-    if "names" in question_lower and "name" in columns and "name" not in detected_columns:
-        detected_columns.append("name")
-
-    return detected_columns
-
-
-def extract_value_filters(question_lower, columns, column_values):
-    filters = []
-
-    q_emb = encode_text_to_embedding(question_lower)
-
-    for column, values in column_values.items():
-        for value in values:
-            if str(value).isnumeric():
-                continue
-
-            v_emb = encode_text_to_embedding(str(value))
-            score = cosine_sim(q_emb, v_emb)
-
-            if str(value).lower() in question_lower or score > 0.55:
-                filters.append(f"{column} = '{value}'")
-
-    return filters
-
-
-def extract_numeric_filters(question_lower, columns):
-    filters = []
-
-    for column in columns:
-        pattern = rf"{column.lower()}\s*(>=|<=|>|<|=)\s*(\d+)"
-        match = re.search(pattern, question_lower)
-
-        if match:
-            operator = match.group(1)
-            numeric_value = match.group(2)
-            filters.append(f"{column} {operator} {numeric_value}")
-
-    return filters
-
-
-def extract_fallback_numeric_filter(question_lower, conn, table, columns, existing_filters):
-    numeric_patterns = re.findall(r'(>=|<=|>|<)\s*(\d+)', question_lower)
-
-    numeric_columns = infer_numeric_columns(conn, table, columns)
-
-    if numeric_patterns and len(numeric_columns) == 1:
-        for operator, value in numeric_patterns:
-            candidate_filter = f"{numeric_columns[0]} {operator} {value}"
-
-            if candidate_filter not in existing_filters:
-                return candidate_filter
-
-    return None
-
-
-def build_sql_query(components, intent):
-    if not components:
-        return None
-
-    table = components["table"]
-
-    if intent == "COUNT":
-        query = f"SELECT COUNT(*) FROM {table}"
-
-    elif intent == "AGGREGATE":
-        numeric_candidates = [
-            col for col in components["columns"]
-            if col != "*" and any(
-                word in col.lower()
-                for word in ["salary", "price", "amount", "age", "score", "marks"]
-            )
-        ]
-
-        target_col = numeric_candidates[0] if numeric_candidates else "*"
-
-        query = f"SELECT MAX({target_col}) FROM {table}"
-
-    else:
-        select_clause = ", ".join(components["columns"])
-        query = f"SELECT {select_clause} FROM {table}"
-
-    if components["filters"]:
-        where_clause = " AND ".join(components["filters"])
-        query += f" WHERE {where_clause}"
-
-    return query
-
-
-def validate_and_rewrite_query(question, schema, old_sql, conn):
-    intent = classify_query_intent(question, schema)
-
-    old_sql_components = extract_sql_components(old_sql)
-
-    question_components = extract_components_from_question(question, schema, conn)
-
-    final_components = {
-        "table": question_components["table"] or old_sql_components.get("from"),
-        "columns": question_components["columns"]
-        if question_components["columns"]
-        else old_sql_components.get("select", ["*"]),
-        "filters": question_components["filters"]
-    }
-
-    if intent == "COUNT":
-        final_components["columns"] = ["*"]
-
-    corrected_sql = build_sql_query(final_components, intent)
-
-    return {
-        "question": question,
-        "old_sql": old_sql,
-        "old_parts": old_sql_components,
-        "question_parts": question_components,
-        "intent": intent,
-        "corrected_sql": corrected_sql
-    }
+        with get_db() as conn:
+            pipeline_output = pipeline_service.run(question, conn)
+
+        return QueryResponse(
+            question=question,
+            schema=[SchemaTable(**table) for table in pipeline_output["schema_bundle"]["tables"]],
+            generated_sql=pipeline_output["generated_sql"],
+            validated_sql=pipeline_output["validated_sql"],
+            final_sql=pipeline_output["final_sql"],
+            result=pipeline_output["result"],
+            optimization=pipeline_output["optimization"],
+            intent=pipeline_output["validation"].get("intent", "SELECT"),
+            pipeline_trace=PipelineTrace(
+                schema_text=pipeline_output["schema_bundle"]["schema_text"],
+                headers=pipeline_output["schema_bundle"]["headers"],
+                generated_input=pipeline_output["generated_input"],
+                validator_intent=pipeline_output["validation"].get("intent", "SELECT"),
+            ),
+        )
+    except Exception as exc:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/schema")
+def schema() -> Dict[str, Any]:
+    """Return the live schema extracted from the database."""
+    with get_db() as conn:
+        return build_schema_bundle(conn)
+
+
+@app.get("/health")
+def health() -> Dict[str, str]:
+    """Return API health details."""
+    return {"status": "ok", "model": HF_MODEL_ID}

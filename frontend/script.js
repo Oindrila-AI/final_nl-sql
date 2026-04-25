@@ -1,54 +1,79 @@
 async function generateSQL() {
+    const question = document.getElementById("userInput").value.trim();
+    if (!question) return;
 
-    let query = document.getElementById("userInput").value;
-
-    document.getElementById("sqlOutput").innerText = "Generating...";
-    document.getElementById("tableOutput").innerHTML = "";
+    document.getElementById("loader").style.display = "block";
+    document.getElementById("results").style.display = "none";
+    document.getElementById("errorBox").style.display = "none";
 
     try {
-
-        let response = await fetch("http://127.0.0.1:8000/query", {
+        const response = await fetch("http://127.0.0.1:8000/query", {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ question: query })
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ question }),
         });
 
-        let data = await response.json();
+        const data = await response.json();
+        document.getElementById("loader").style.display = "none";
 
-        document.getElementById("sqlOutput").innerText = data.sql;
+        if (!response.ok) {
+            showError(data.detail || "Server error");
+            return;
+        }
 
-        let tableHTML = "<table>";
+        document.getElementById("schemaText").innerText = data.pipeline_trace?.schema_text || "-";
+        document.getElementById("schemaHeaders").innerText = (data.pipeline_trace?.headers || []).join(" | ") || "-";
+        document.getElementById("generatorInput").innerText = data.pipeline_trace?.generated_input || "-";
+        document.getElementById("validatorIntent").innerText = data.pipeline_trace?.validator_intent || "-";
+        document.getElementById("generatedSQL").innerText = data.generated_sql || "-";
+        document.getElementById("validatedSQL").innerText = data.validated_sql || "-";
+        document.getElementById("finalSQL").innerText = data.final_sql || "-";
+        document.getElementById("intentBadge").innerText = data.intent || "SELECT";
 
-        // Headers
-        let keys = Object.keys(data.result[0]);
-        tableHTML += "<tr>";
-        keys.forEach(key => {
-            tableHTML += `<th>${key}</th>`;
-        });
-        tableHTML += "</tr>";
+        const bench = data.optimization?.benchmark || {};
+        document.getElementById("beforeMs").innerText = bench.before_ms ? bench.before_ms + " ms" : "-";
+        document.getElementById("afterMs").innerText = bench.after_ms ? bench.after_ms + " ms" : "-";
+        document.getElementById("speedup").innerText = bench.speedup ? bench.speedup + "x" : "-";
 
-        // Rows
-        data.result.forEach(row => {
-            tableHTML += "<tr>";
-            keys.forEach(key => {
-                tableHTML += `<td>${row[key]}</td>`;
+        const recs = data.optimization?.recommended_indexes || [];
+        if (recs.length > 0) {
+            document.getElementById("indexRecs").innerHTML =
+                "<p><b>Recommended indexes:</b></p><ul>" +
+                recs.map((item) => `<li><code>${item}</code></li>`).join("") +
+                "</ul>";
+        } else {
+            document.getElementById("indexRecs").innerHTML = "<p>No index recommendations.</p>";
+        }
+
+        const rows = data.result || [];
+        if (rows.length === 0) {
+            document.getElementById("tableOutput").innerHTML = "<p>No results found.</p>";
+        } else {
+            const keys = Object.keys(rows[0]);
+            let html = "<table><tr>" + keys.map((key) => `<th>${key}</th>`).join("") + "</tr>";
+            rows.forEach((row) => {
+                html += "<tr>" + keys.map((key) => `<td>${row[key] ?? ""}</td>`).join("") + "</tr>";
             });
-            tableHTML += "</tr>";
-        });
+            html += "</table>";
+            document.getElementById("tableOutput").innerHTML = html;
+        }
 
-        tableHTML += "</table>";
-
-        document.getElementById("tableOutput").innerHTML = tableHTML;
-
+        document.getElementById("results").style.display = "block";
     } catch (error) {
-        document.getElementById("sqlOutput").innerText = "Error connecting to server";
+        document.getElementById("loader").style.display = "none";
+        showError("Could not connect to server. Make sure the backend is running.");
     }
+}
+
+function showError(message) {
+    const box = document.getElementById("errorBox");
+    box.innerText = "Error: " + message;
+    box.style.display = "block";
 }
 
 function clearAll() {
     document.getElementById("userInput").value = "";
-    document.getElementById("sqlOutput").innerText = "";
-    document.getElementById("tableOutput").innerHTML = "";
+    document.getElementById("results").style.display = "none";
+    document.getElementById("errorBox").style.display = "none";
+    document.getElementById("loader").style.display = "none";
 }

@@ -3,38 +3,103 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NLP to SQL Converter</title>
-
-    <!-- Connect CSS file -->
+    <title>NLP to SQL Pipeline</title>
     <link rel="stylesheet" href="style.css">
 </head>
-
 <body>
-
 <div class="container">
+    <div class="header">
+        <h1>NL to SQL Pipeline</h1>
+        <p class="subtitle">Schema extraction, SQL generation, validation, optimization, and results in one flow.</p>
+    </div>
 
-    <h1>NLP to SQL Converter</h1>
+    <div class="input-section">
+        <textarea id="userInput" placeholder="e.g. Show all employees in the engineering department"></textarea>
+        <div class="btn-row">
+            <button onclick="generateSQL()">Run Pipeline</button>
+            <button class="clear-btn" onclick="clearAll()">Clear</button>
+        </div>
+    </div>
 
-    <textarea id="userInput" placeholder="Ask your query..."></textarea>
+    <div id="loader" class="loader" style="display:none">Processing pipeline...</div>
+    <div id="errorBox" class="error" style="display:none"></div>
 
-    <br>
+    <div id="results" style="display:none">
+        <div class="card">
+            <h3>Schema Stage</h3>
+            <div class="schema-grid">
+                <div>
+                    <div class="mini-label">Schema Summary</div>
+                    <pre id="schemaText"></pre>
+                </div>
+                <div>
+                    <div class="mini-label">Flattened Headers</div>
+                    <pre id="schemaHeaders"></pre>
+                </div>
+            </div>
+        </div>
 
-    <button onclick="generateSQL()">Generate SQL</button>
-    <button onclick="clearAll()">Clear</button>
+        <div class="pipeline">
+            <div class="stage">
+                <div class="stage-label">Generator</div>
+                <pre id="generatedSQL"></pre>
+            </div>
+            <div class="arrow">-></div>
+            <div class="stage">
+                <div class="stage-label">Validator</div>
+                <pre id="validatedSQL"></pre>
+            </div>
+            <div class="arrow">-></div>
+            <div class="stage">
+                <div class="stage-label">Optimizer / Executor</div>
+                <pre id="finalSQL"></pre>
+            </div>
+        </div>
 
-    <h2>SQL Query</h2>
-    <pre id="sqlOutput"></pre>
+        <div class="intent-row">
+            Intent detected: <span id="intentBadge" class="badge"></span>
+        </div>
 
-    <h2>Result</h2>
-    <div id="tableOutput"></div>
+        <div class="card">
+            <h3>Pipeline Trace</h3>
+            <div class="trace-grid">
+                <div>
+                    <div class="mini-label">Generator Input</div>
+                    <pre id="generatorInput"></pre>
+                </div>
+                <div>
+                    <div class="mini-label">Validator Intent</div>
+                    <pre id="validatorIntent"></pre>
+                </div>
+            </div>
+        </div>
 
+        <div class="card">
+            <h3>Query Optimization</h3>
+            <div class="bench-row">
+                <div class="bench-item">
+                    <div class="bench-label">Before</div>
+                    <div class="bench-val" id="beforeMs">-</div>
+                </div>
+                <div class="bench-item">
+                    <div class="bench-label">After</div>
+                    <div class="bench-val" id="afterMs">-</div>
+                </div>
+                <div class="bench-item">
+                    <div class="bench-label">Speedup</div>
+                    <div class="bench-val speedup" id="speedup">-</div>
+                </div>
+            </div>
+            <div id="indexRecs"></div>
+        </div>
+
+        <div class="card">
+            <h3>Results</h3>
+            <div id="tableOutput"></div>
+        </div>
+    </div>
 </div>
 
-<!-- Connect JS file -->
 <script src="script.js"></script>
-
 </body>
 </html>
-
-<link rel="stylesheet" href="style.css">
-<script src="script.js"></script>
