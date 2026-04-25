@@ -73,6 +73,7 @@ class QueryResponse(BaseModel):
     schema: List[SchemaTable]
     generated_sql: str
     validated_sql: str
+    optimized_sql: str
     final_sql: str
     result: List[Dict[str, Any]]
     optimization: Dict[str, Any]
@@ -113,6 +114,7 @@ def query(req: QueryRequest) -> QueryResponse:
             schema=[SchemaTable(**table) for table in pipeline_output["schema_bundle"]["tables"]],
             generated_sql=pipeline_output["generated_sql"],
             validated_sql=pipeline_output["validated_sql"],
+            optimized_sql=pipeline_output["optimized_sql"],
             final_sql=pipeline_output["final_sql"],
             result=pipeline_output["result"],
             optimization=pipeline_output["optimization"],

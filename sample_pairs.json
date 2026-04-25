@@ -1,0 +1,42 @@
+[
+  {
+    "question": "Show all employees",
+    "sql": "SELECT * FROM employees"
+  },
+  {
+    "question": "List all department names",
+    "sql": "SELECT dept_name FROM departments"
+  },
+  {
+    "question": "What is the average salary of employees?",
+    "sql": "SELECT AVG(salary) FROM employees"
+  },
+  {
+    "question": "Show the names of employees in the Engineering department",
+    "sql": "SELECT e.first_name, e.last_name FROM employees e JOIN departments d ON e.dept_id = d.dept_id WHERE d.dept_name = 'Engineering'"
+  },
+  {
+    "question": "How many employees are there in each department?",
+    "sql": "SELECT d.dept_name, COUNT(*) FROM employees e JOIN departments d ON e.dept_id = d.dept_id GROUP BY d.dept_name"
+  },
+  {
+    "question": "Which employee has the highest salary?",
+    "sql": "SELECT first_name, last_name, salary FROM employees ORDER BY salary DESC LIMIT 1"
+  },
+  {
+    "question": "List all projects with a budget greater than 300000",
+    "sql": "SELECT * FROM projects WHERE budget > 300000"
+  },
+  {
+    "question": "Show employees hired after 2021",
+    "sql": "SELECT first_name, last_name, hire_date FROM employees WHERE hire_date > '2021-01-01'"
+  },
+  {
+    "question": "What projects is Alice working on?",
+    "sql": "SELECT p.project_name, ep.role FROM projects p JOIN employee_projects ep ON p.project_id = ep.project_id JOIN employees e ON ep.emp_id = e.emp_id WHERE e.first_name = 'Alice'"
+  },
+  {
+    "question": "Show the total budget of all projects",
+    "sql": "SELECT SUM(budget) FROM projects"
+  }
+]

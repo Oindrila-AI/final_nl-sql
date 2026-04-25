@@ -48,6 +48,7 @@ class NL2SQLPipelineService:
             "generated_sql": generated_sql,
             "validation": validation,
             "validated_sql": validated_sql,
+            "optimized_sql": execution["executed_sql"],
             "final_sql": execution["executed_sql"],
             "result": execution["rows"],
             "optimization": optimization,

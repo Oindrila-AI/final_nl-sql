@@ -41,18 +41,18 @@
 
         <div class="pipeline">
             <div class="stage">
-                <div class="stage-label">Generator</div>
+                <div class="stage-label">Generated SQL</div>
                 <pre id="generatedSQL"></pre>
             </div>
             <div class="arrow">-></div>
             <div class="stage">
-                <div class="stage-label">Validator</div>
+                <div class="stage-label">Validated SQL</div>
                 <pre id="validatedSQL"></pre>
             </div>
             <div class="arrow">-></div>
             <div class="stage">
-                <div class="stage-label">Optimizer / Executor</div>
-                <pre id="finalSQL"></pre>
+                <div class="stage-label">Optimized SQL</div>
+                <pre id="optimizedSQL"></pre>
             </div>
         </div>
 
@@ -76,6 +76,8 @@
 
         <div class="card">
             <h3>Query Optimization</h3>
+            <div class="mini-label">Executed SQL</div>
+            <pre id="finalSQL"></pre>
             <div class="bench-row">
                 <div class="bench-item">
                     <div class="bench-label">Before</div>

@@ -27,6 +27,7 @@ async function generateSQL() {
         document.getElementById("validatorIntent").innerText = data.pipeline_trace?.validator_intent || "-";
         document.getElementById("generatedSQL").innerText = data.generated_sql || "-";
         document.getElementById("validatedSQL").innerText = data.validated_sql || "-";
+        document.getElementById("optimizedSQL").innerText = data.optimized_sql || data.final_sql || "-";
         document.getElementById("finalSQL").innerText = data.final_sql || "-";
         document.getElementById("intentBadge").innerText = data.intent || "SELECT";
 
