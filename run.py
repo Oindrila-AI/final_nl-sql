@@ -1,3 +1,10 @@
-"""Run this to start the server."""
+"""Run the FastAPI server locally or on a hosting platform like Render."""
+
+import os
+
 import uvicorn
-uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
